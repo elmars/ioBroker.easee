@@ -7,12 +7,13 @@ const signalR = require('@microsoft/signalr');
 const objEnum = require('./lib/enum.js');
 
 //Eigene Variablen
-const apiUrl = 'https://api.easee.cloud';
+const apiUrl = 'https://api.easee.com';
 const adapterIntervals = {}; //halten von allen Intervallen
 let accessToken = '';
 let refreshToken = '';
 let expireTime = Date.now();
 let polltime = 30;
+let logtype = false;
 const minPollTimeEnergy = 120;
 let roundCounter = 0;
 const arrCharger = [];
@@ -102,6 +103,7 @@ class Easee extends utils.Adapter {
         } else {
             polltime = this.config.polltime;
         }
+        logtype = this.config.logtype;
         // Testen ob der Login funktioniert
         if (this.config.username == '' || this.config.username == '+49') {
             this.log.error('No username set');
@@ -158,7 +160,7 @@ class Easee extends utils.Adapter {
     async readAllStates() {
         if(expireTime <= Date.now()) {
             //Token ist expired!
-            this.log.info('Token has expired - refresh');
+            if (logtype) this.log.info('Token has expired - refresh');
             await this.refreshToken();
         }
 
@@ -174,7 +176,7 @@ class Easee extends utils.Adapter {
                     await this.setAllStatusObjects(charger);
                     await this.setAllConfigObjects(charger);
 
-                    //meken uns den charger
+                    //merken uns den charger
                     arrCharger.push(charger.id);
                 }
 
@@ -257,7 +259,7 @@ class Easee extends utils.Adapter {
                             this.log.debug('Get infos from site:');
                             this.log.debug(JSON.stringify(site));
 
-                            //setze die WErte für das Update
+                            //Setze die Werte für das Update
                             switch (tmpControl[4]) {
                                 case 'dynamicCircuitCurrentP1':
                                     dynamicCircuitCurrentP1 = Number(state.val);
@@ -284,7 +286,12 @@ class Easee extends utils.Adapter {
 
                     } else {
                         this.log.debug('update config to API: ' + id);
-                        this.changeConfig(tmpControl[2], tmpControl[4], state.val);
+                        if (tmpControl[4] == 'isEnabled') {
+                            this.changeConfig(tmpControl[2], 'enabled', state.val);
+                        } else {
+                            this.changeConfig(tmpControl[2], tmpControl[4], state.val);
+
+                        }
                         this.log.debug('Changes sent to API');
                     }
                 }
@@ -402,7 +409,7 @@ class Easee extends utils.Adapter {
 
             accessToken = response.data.accessToken;
             refreshToken = response.data.refreshToken;
-            expireTime = Date.now() + (response.data.expiresIn - (polltime * 2)) * 1000;
+            expireTime = Date.now() + (response.data.expiresIn - 500);
             this.log.debug(JSON.stringify(response.data));
             await this.setStateAsync('info.connection', true, true);
             return true;
@@ -423,16 +430,17 @@ class Easee extends utils.Adapter {
         return await axios.post(apiUrl + '/api/accounts/refresh_token', {
             accessToken: accessToken,
             refreshToken: refreshToken
-        }).then(response => {
-            this.log.info('RefreshToken successful');
+        }).then(async response => {
+            if (logtype) this.log.info('RefreshToken successful');
             accessToken = response.data.accessToken;
             refreshToken = response.data.refreshToken;
-            expireTime = Date.now() + (response.data.expiresIn - (polltime * 2)) * 1000;
-
+            expireTime = Date.now() + (response.data.expiresIn - 500);
+            await this.setStateAsync('info.connection', true, true);
             this.log.debug(JSON.stringify(response.data));
-        }).catch((error) => {
+        }).catch(async (error) => {
             this.log.error('RefreshToken error');
             this.log.error(error);
+            await this.setStateAsync('info.connection', false, true);
         });
     }
 
@@ -1191,7 +1199,7 @@ class Easee extends utils.Adapter {
                 type: 'boolean',
                 role: 'switch.enabled',
                 read: true,
-                write: false,
+                write: true,
             },
             native: {},
         });
